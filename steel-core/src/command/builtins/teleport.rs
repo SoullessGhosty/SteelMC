@@ -2,11 +2,6 @@
 
 use std::{slice, sync::Arc};
 
-use glam::DVec3;
-use steel_protocol::packets::game::{CSetCamera, RelativeMovement};
-use steel_utils::{BlockPos, Identifier, translations};
-use text_components::TextComponent;
-use steel_math::wrap_degrees;
 use super::super::{
     brigadier::{CommandNodeBuilder, CommandSyntaxError},
     execution::{
@@ -20,6 +15,11 @@ use crate::{
     portal::{TeleportPostTransition, TeleportTransition},
     world::World,
 };
+use glam::DVec3;
+use steel_math::wrap_degrees;
+use steel_protocol::packets::game::{CSetCamera, RelativeMovement};
+use steel_utils::{BlockPos, Identifier, translations};
+use text_components::TextComponent;
 
 pub(super) fn registration() -> CommandRegistration<CommandSource> {
     CommandRegistration::new(Identifier::vanilla_static("teleport"), |_| command()).alias("tp")
