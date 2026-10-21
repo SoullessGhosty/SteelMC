@@ -1,9 +1,7 @@
 //! Vanilla command coordinate expressions.
 
-use std::f32::consts::PI;
-
 use glam::DVec3;
-use steel_math::{trig, DEG_TO_RAD, DEGREE_90};
+use steel_math::{DEGREE_90, DEG_TO_RAD, trig};
 use steel_utils::{BlockPos, translations};
 use text_components::{TextComponent, translation::Translation};
 
