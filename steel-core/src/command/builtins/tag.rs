@@ -31,44 +31,6 @@ fn command() -> CommandNodeBuilder<CommandSource, SteelCommandRuntime> {
     )
 }
 
-/// Counts the elements with a non-zero result and remembers the only one, so
-/// feedback can name a lone affected element instead of a count.
-struct ResponseTracker<'a, T> {
-    non_zero_count: usize,
-    first_non_zero: Option<&'a T>,
-}
-
-impl<'a, T> ResponseTracker<'a, T> {
-    const fn new() -> Self {
-        Self {
-            non_zero_count: 0,
-            first_non_zero: None,
-        }
-    }
-
-    const fn track(&mut self, element: &'a T, non_zero: bool) {
-        if !non_zero {
-            return;
-        }
-        if self.non_zero_count == 0 {
-            self.first_non_zero = Some(element);
-        }
-        self.non_zero_count += 1;
-    }
-
-    const fn only_non_zero(&self) -> Option<&'a T> {
-        if self.non_zero_count == 1 {
-            self.first_non_zero
-        } else {
-            None
-        }
-    }
-
-    fn total(&self) -> i32 {
-        i32::try_from(self.non_zero_count).unwrap_or(i32::MAX)
-    }
-}
-
 fn add_tag(context: &SteelCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
     let name = context.string("name")?;
     change_tags(
@@ -102,63 +64,53 @@ fn change_tags(
     change: impl Fn(&SharedEntity) -> bool,
 ) -> Result<i32, CommandSyntaxError> {
     let targets = context.entities("targets")?;
-    let mut tracker = ResponseTracker::new();
-    for target in &targets {
-        tracker.track(target, change(target));
-    }
+    let changed: Vec<_> = targets.iter().filter(|target| change(target)).collect();
 
-    if tracker.non_zero_count == 0 {
-        return Err(CommandSyntaxError::dynamic(TextComponent::from(failed)));
-    }
-
-    let message = match tracker.only_non_zero() {
-        Some(target) => single
+    let message = match changed.as_slice() {
+        [] => return Err(CommandSyntaxError::dynamic(TextComponent::from(failed))),
+        [target] => single
             .message([TextComponent::plain(name.to_owned()), target.display_name()])
             .component(),
-        None => multiple
+        _ => multiple
             .message([
                 TextComponent::plain(name.to_owned()),
-                TextComponent::plain(tracker.non_zero_count.to_string()),
+                TextComponent::plain(changed.len().to_string()),
             ])
             .component(),
     };
     context.source().send_success(&message, true);
 
-    Ok(tracker.total())
+    Ok(i32::try_from(changed.len()).unwrap_or(i32::MAX))
 }
 
 fn list_tags(context: &SteelCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
     let targets = context.entities("targets")?;
-    let mut tracker = ResponseTracker::new();
-    let mut tags = BTreeSet::new();
-    for target in &targets {
-        let entity_tags = target.tags();
-        tracker.track(target, !entity_tags.is_empty());
-        tags.extend(entity_tags);
-    }
+    let tagged: Vec<_> = targets
+        .iter()
+        .filter(|target| !target.tags().is_empty())
+        .collect();
+    let tags: BTreeSet<String> = tagged.iter().flat_map(|target| target.tags()).collect();
 
-    // The empty feedback also goes through the non-zero tracker, so it is
-    // always the multiple form, even for a single target.
-    let message = if tags.is_empty() {
-        translations::COMMANDS_TAG_LIST_MULTIPLE_EMPTY
-            .message([TextComponent::plain(tracker.non_zero_count.to_string())])
-            .component()
-    } else if let Some(target) = tracker.only_non_zero() {
-        translations::COMMANDS_TAG_LIST_SINGLE_SUCCESS
+    // Vanilla's empty feedback counts tagged targets, so it is always the
+    // multiple form, even for a single target.
+    let message = match tagged.as_slice() {
+        [] => translations::COMMANDS_TAG_LIST_MULTIPLE_EMPTY
+            .message([TextComponent::plain("0")])
+            .component(),
+        [target] => translations::COMMANDS_TAG_LIST_SINGLE_SUCCESS
             .message([
                 target.display_name(),
                 TextComponent::plain(tags.len().to_string()),
                 format_list(&tags),
             ])
-            .component()
-    } else {
-        translations::COMMANDS_TAG_LIST_MULTIPLE_SUCCESS
+            .component(),
+        _ => translations::COMMANDS_TAG_LIST_MULTIPLE_SUCCESS
             .message([
-                TextComponent::plain(tracker.non_zero_count.to_string()),
+                TextComponent::plain(tagged.len().to_string()),
                 TextComponent::plain(tags.len().to_string()),
                 format_list(&tags),
             ])
-            .component()
+            .component(),
     };
     context.source().send_success(&message, false);
 
@@ -175,30 +127,4 @@ fn format_list(values: &BTreeSet<String>) -> TextComponent {
         list = list.add_child(TextComponent::plain(value.clone()).color(Color::Green));
     }
     list
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ResponseTracker;
-
-    #[test]
-    fn tracker_only_reports_a_lone_non_zero_element() {
-        let elements = ["a", "b", "c"];
-
-        let mut tracker = ResponseTracker::new();
-        for element in &elements {
-            tracker.track(element, false);
-        }
-        assert_eq!((tracker.total(), tracker.only_non_zero()), (0, None));
-
-        let mut tracker = ResponseTracker::new();
-        tracker.track(&elements[0], false);
-        tracker.track(&elements[1], true);
-        tracker.track(&elements[2], false);
-        assert_eq!(tracker.total(), 1);
-        assert_eq!(tracker.only_non_zero(), Some(&"b"));
-
-        tracker.track(&elements[2], true);
-        assert_eq!((tracker.total(), tracker.only_non_zero()), (2, None));
-    }
 }
