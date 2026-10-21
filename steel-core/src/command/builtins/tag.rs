@@ -80,7 +80,8 @@ fn change_tags(
     };
     context.source().send_success(&message, true);
 
-    Ok(i32::try_from(changed.len()).unwrap_or(i32::MAX))
+    // max is 1024
+    Ok(changed.len() as i32)
 }
 
 fn list_tags(context: &SteelCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
@@ -114,7 +115,8 @@ fn list_tags(context: &SteelCommandContext<CommandSource>) -> Result<i32, Comman
     };
     context.source().send_success(&message, false);
 
-    Ok(i32::try_from(tags.len()).unwrap_or(i32::MAX))
+    // max is 1024
+    Ok(tags.len() as i32)
 }
 
 /// Sorted, green values joined by a gray separator.
