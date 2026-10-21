@@ -5,6 +5,7 @@ use std::sync::{Arc, Weak};
 use glam::DVec3;
 use rand::rngs::ThreadRng;
 use smallvec::SmallVec;
+use steel_registry::DyeColor;
 use steel_registry::block_entity_type::BlockEntityTypeRef;
 use steel_registry::blocks::BlockRef;
 use steel_registry::blocks::block_state_ext::BlockStateExt;
@@ -47,7 +48,6 @@ use crate::world::{
 };
 use steel_registry::vanilla_fluids;
 
-/// Vanilla `BlockBehaviour.canBeReplaced(BlockState, BlockPlaceContext)`.
 pub(crate) fn default_can_be_replaced(
     state: BlockStateId,
     context: &BlockPlaceContext<'_>,
@@ -148,7 +148,7 @@ use collision::world_aabb_bounds;
 /// - State changes
 pub trait BlockBehavior: Send + Sync {
     /// Returns the Rust type name of the concrete behavior implementation.
-    #[cfg(feature = "flint")]
+    #[cfg(feature = "test-framework")]
     #[must_use]
     #[expect(clippy::absolute_paths, reason = "easier for features")]
     fn type_name(&self) -> &'static str {
@@ -331,8 +331,6 @@ pub trait BlockBehavior: Send + Sync {
     }
 
     /// Called after a player successfully removes this block.
-    ///
-    /// Mirrors vanilla `Block.destroy(LevelAccessor, BlockPos, BlockState)`.
     #[expect(
         unused_variables,
         reason = "default trait implementation ignores all params"
@@ -579,15 +577,17 @@ pub trait BlockBehavior: Send + Sync {
     /// # Arguments
     /// * `block` - The block being picked
     /// * `_state` - The block state (some blocks vary pick item based on state)
+    /// * `_block_entity` - An optional block entity (some blocks vary pick item based on block entity data)
     /// * `_include_data` - Whether to include block entity data (creative + Ctrl)
     #[expect(
         unused_variables,
-        reason = "default implementation only uses `block`; state/include_data are for overrides"
+        reason = "default implementation only uses `block`; state/block_entity/include_data are for overrides"
     )]
     fn get_clone_item_stack(
         &self,
         block: BlockRef,
         state: BlockStateId,
+        block_entity: Option<SharedBlockEntity>,
         include_data: bool,
     ) -> Option<ItemStack> {
         Some(ItemStack::new(REGISTRY.items.by_block(block)))
@@ -609,6 +609,26 @@ pub trait BlockBehavior: Send + Sync {
     fn is_bed(&self) -> bool {
         false
     }
+
+    /// Sleep height
+    ///
+    /// `None` rejects sleeping
+    #[expect(unused_variables, reason = "only bed behaviors provide a sleep height")]
+    fn get_sleep_height(
+        &self,
+        state: BlockStateId,
+        world: &dyn LevelReader,
+        pos: BlockPos,
+    ) -> Option<f64> {
+        None
+    }
+
+    /// Sleep exit hook
+    #[expect(
+        unused_variables,
+        reason = "only blocks with leave-sleep behavior override this hook"
+    )]
+    fn on_stop_sleeping(&self, state: BlockStateId, world: &Arc<World>, pos: BlockPos) {}
 
     /// Returns whether this behavior implements vanilla `LiquidBlock`.
     fn is_liquid_block(&self) -> bool {
@@ -915,7 +935,8 @@ pub trait BlockBehavior: Send + Sync {
         context: EntityFallOnContext<'_>,
     ) -> Option<EntityFallDamage> {
         Some(EntityFallDamage::new(
-            context.fall_distance,
+            context.fall_distance
+                * f64::from(1f32 - state.get_block().config.fall_distance_reduction),
             1.0,
             DamageSource::environment(&vanilla_damage_types::FALL),
         ))
@@ -932,6 +953,21 @@ pub trait BlockBehavior: Send + Sync {
         context: EntityFallOnContext<'_>,
     ) -> Option<EntityFallDamage> {
         self.default_fall_on(state, world, pos, context)
+    }
+
+    /// called when an entity bounce on the block.
+    /// only works if the block has a restitution > 0.0 and the entity is not suppressing bounce
+    #[expect(
+        unused_variables,
+        reason = "default trait implementation ignores all params"
+    )]
+    fn bounce_on(
+        &self,
+        state: BlockStateId,
+        world: &Arc<World>,
+        pos: BlockPos,
+        context: EntityFallOnContext<'_>,
+    ) {
     }
 
     /// Called after fall damage requested by [`BlockBehavior::fall_on`] is applied.
@@ -982,8 +1018,21 @@ pub trait BlockBehavior: Send + Sync {
         world: &Arc<World>,
         pos: BlockPos,
         context: EntityLandingContext,
-    ) -> DVec3 {
-        self.default_update_entity_movement_after_fall_on(state, world, pos, context)
+    ) -> (DVec3, bool) {
+        let restitution = state.get_block().config.bounce_restitution;
+        if context.velocity.y >= 0.0
+            || restitution <= 0.0
+            || context.suppresses_bounce
+            || state.get_block().has_tag(&BlockTag::SUPPRESSES_BOUNCE)
+            || -context.velocity.y <= context.gravity
+        {
+            (
+                self.default_update_entity_movement_after_fall_on(state, world, pos, context),
+                false,
+            )
+        } else {
+            (context.velocity_after_bounce(restitution), true)
+        }
     }
 
     /// Default step-on hook.
@@ -1031,6 +1080,17 @@ pub trait BlockBehavior: Send + Sync {
         state: BlockStateId,
     ) -> BlockEntityCreation {
         BlockEntityCreation::Unimplemented
+    }
+
+    /// Returns the beam tint this block contributes to a beacon beam passing through it.
+    ///
+    /// Steel models Vanilla's `BeaconBeamBlock` marker interface as a trait method so third
+    /// party blocks can join a beacon beam without a new interface: `None` means the block is
+    /// not a beam block, matching a Vanilla class that does not implement `BeaconBeamBlock`.
+    ///
+    /// Vanilla parity: `BeaconBeamBlock.getColor()`.
+    fn beacon_beam_color(&self, _state: BlockStateId) -> Option<DyeColor> {
+        None
     }
 
     /// Returns the server ticker selected by this live block state and entity type.
