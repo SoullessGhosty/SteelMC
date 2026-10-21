@@ -9,7 +9,7 @@ use steel_registry::{
 };
 use steel_utils::translations;
 use text_components::{Modifier, TextComponent, format::Color};
-use steel_math::DEGREE_90;
+use steel_math::{wrap_degrees, DEGREE_90};
 use crate::{
     command::{
         brigadier::CommandSyntaxError,
@@ -882,16 +882,8 @@ fn admin_broadcast_source_name(
     )
 }
 
-fn normalize_rotation((mut yaw, mut pitch): (f32, f32)) -> (f32, f32) {
-    yaw = yaw.rem_euclid(360.0);
-    if yaw >= 180.0 {
-        yaw -= 360.0;
-    }
-    pitch = pitch.rem_euclid(360.0);
-    if pitch >= 180.0 {
-        pitch -= 360.0;
-    }
-    (yaw, pitch)
+fn normalize_rotation((yaw, pitch): (f32, f32)) -> (f32, f32) {
+    (wrap_degrees(yaw), wrap_degrees(pitch))
 }
 
 #[cfg(test)]
