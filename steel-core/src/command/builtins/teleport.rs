@@ -6,7 +6,7 @@ use glam::DVec3;
 use steel_protocol::packets::game::{CSetCamera, RelativeMovement};
 use steel_utils::{BlockPos, Identifier, translations};
 use text_components::TextComponent;
-
+use steel_math::wrap_degrees;
 use super::super::{
     brigadier::{CommandNodeBuilder, CommandSyntaxError},
     execution::{
@@ -412,15 +412,6 @@ fn packet_rotation(
 
 fn wrap_rotation((yaw, pitch): (f32, f32)) -> (f32, f32) {
     (wrap_degrees(yaw), wrap_degrees(pitch))
-}
-
-fn wrap_degrees(value: f32) -> f32 {
-    let wrapped = value.rem_euclid(360.0);
-    if wrapped >= 180.0 {
-        wrapped - 360.0
-    } else {
-        wrapped
-    }
 }
 
 fn send_entity_success(source: &CommandSource, targets: &[SharedEntity], destination: &dyn Entity) {

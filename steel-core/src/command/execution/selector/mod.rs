@@ -446,6 +446,7 @@ mod suggestions;
 
 use model::create_delta_aabb;
 pub(crate) use parser::*;
+use steel_math::wrap_degrees;
 pub(crate) use suggestions::*;
 
 #[cfg(test)]
