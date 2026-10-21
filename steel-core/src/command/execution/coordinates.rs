@@ -1,7 +1,7 @@
 //! Vanilla command coordinate expressions.
 
 use glam::DVec3;
-use steel_math::{DEGREE_90, DEG_TO_RAD, trig};
+use steel_math::{DEG_TO_RAD, DEGREE_90, trig};
 use steel_utils::{BlockPos, translations};
 use text_components::{TextComponent, translation::Translation};
 
