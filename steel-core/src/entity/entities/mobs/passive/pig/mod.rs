@@ -358,8 +358,8 @@ impl LivingEntity for PigEntity {
         (slot == EquipmentSlot::Saddle).then_some(&sound_events::ENTITY_PIG_SADDLE)
     }
 
-    fn server_ai_step(&self) {
-        Mob::mob_server_ai_step(self);
+    fn server_ai_step(&self, entity: &SharedEntity) {
+        Mob::mob_server_ai_step(self, entity);
     }
 
     fn tick_ridden(&self, controller: &Player, _ridden_input: DVec3) {
@@ -380,8 +380,8 @@ impl LivingEntity for PigEntity {
         movement_speed * 0.225 * ItemSteerable::boost_factor(self)
     }
 
-    fn ai_step(&self) -> Option<MoveResult> {
-        let result = Mob::mob_ai_step(self);
+    fn ai_step(&self, entity: &SharedEntity) -> Option<MoveResult> {
+        let result = Mob::mob_ai_step(self, entity);
         AgeableMob::tick_ageable_mob(self);
         Animal::tick_animal_love(self);
         result
@@ -408,20 +408,6 @@ impl AgeableMob for PigEntity {
     fn set_synced_baby(&self, baby: bool) {
         self.entity_data.lock().ageable_mob_mut().baby.set(baby);
     }
-}
-
-impl Animal for PigEntity {
-    fn animal_base(&self) -> &AnimalBase {
-        &self.animal_base
-    }
-
-    fn is_food(&self, item_stack: &ItemStack) -> bool {
-        PigEntity::is_food(item_stack)
-    }
-
-    fn play_eating_sound(&self) {
-        self.play_sound(self.current_sound_set().eat_sound, 1.0, 1.0);
-    }
 
     fn breed_variant_key(&self) -> Option<&Identifier> {
         Some(&self.variant().key)
@@ -431,7 +417,7 @@ impl Animal for PigEntity {
         self.set_variant_by_key(key)
     }
 
-    fn initialize_breed_offspring(&self, partner: &dyn Animal, offspring: &dyn Animal) {
+    fn initialize_breed_offspring(&self, partner: &dyn AgeableMob, offspring: &dyn AgeableMob) {
         let use_self_variant = rand::random::<bool>();
         let variant_key = if use_self_variant {
             self.breed_variant_key()
@@ -445,6 +431,20 @@ impl Animal for PigEntity {
         if !offspring.set_breed_variant_key(variant_key) {
             log::error!("pig offspring could not inherit breeding variant {variant_key}");
         }
+    }
+}
+
+impl Animal for PigEntity {
+    fn animal_base(&self) -> &AnimalBase {
+        &self.animal_base
+    }
+
+    fn is_food(&self, item_stack: &ItemStack) -> bool {
+        PigEntity::is_food(item_stack)
+    }
+
+    fn play_eating_sound(&self) {
+        self.play_sound(self.current_sound_set().eat_sound, 1.0, 1.0);
     }
 }
 
@@ -467,8 +467,8 @@ impl Mob for PigEntity {
         &self.mob_base
     }
 
-    fn tick_goal_selectors(&self) {
-        PathfinderMob::tick_pathfinder_goal_selectors(self);
+    fn tick_goal_selectors(&self, entity: &SharedEntity) {
+        PathfinderMob::tick_pathfinder_goal_selectors(self, entity);
     }
 
     fn tick_path_navigation(&self) {

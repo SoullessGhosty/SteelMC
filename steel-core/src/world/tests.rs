@@ -5,20 +5,96 @@ use std::{
 };
 
 use steel_registry::entity_type::EntityTypeRef;
+use steel_registry::sound_event::SoundEventHolder;
 use steel_registry::{
-    init_vanilla_registry, sound_events, vanilla_entities, vanilla_fluids, vanilla_game_rules,
-    vanilla_items,
+    init_vanilla_registry, sound_events, stat::vanilla_stat_types, vanilla_custom_stats,
+    vanilla_entities, vanilla_fluids, vanilla_game_rules, vanilla_items,
 };
 use uuid::Uuid;
 
 use crate::behavior::init_behaviors;
 use crate::chunk::chunk_ticket_manager::ChunkTicketLevel;
-use crate::entity::{EntityBase, entities::PigEntity};
-use crate::test_support::{fresh_test_world, insert_ready_full_chunk, test_world};
+use crate::entity::{EntityBase, LivingEntity as _, entities::PigEntity};
+use crate::player::ResetReason;
+use crate::test_support::{
+    TestPlayerBuilder, fresh_test_world, insert_ready_full_chunk, test_world,
+};
 
 const FIRST_HALF: BlockLocalAabb = BlockLocalAabb::new(0.0, 0.0, 0.0, 0.5, 1.0, 1.0);
 const SECOND_HALF: BlockLocalAabb = BlockLocalAabb::new(0.5, 0.0, 0.0, 1.0, 1.0, 1.0);
 static SPLIT_BLOCK: &[BlockLocalAabb] = &[FIRST_HALF, SECOND_HALF];
+
+#[test]
+fn respawn_world_handoff_requires_the_exact_old_player() {
+    init_vanilla_registry();
+    init_behaviors();
+    let world_fixture = fresh_test_world("exact_respawn_world_handoff");
+    let world = &world_fixture.world;
+    let uuid = Uuid::from_u128(1);
+    let old = TestPlayerBuilder::new(Arc::clone(world), "Old", 1)
+        .uuid(uuid)
+        .build();
+    let replacement = TestPlayerBuilder::new(Arc::clone(world), "Replacement", 1)
+        .uuid(uuid)
+        .build();
+    let stale = TestPlayerBuilder::new(Arc::clone(world), "Stale", 1)
+        .uuid(uuid)
+        .build();
+
+    assert!(world.add_player(Arc::clone(&old), ResetReason::InitialJoin));
+    assert!(!world.player_area_map.is_empty());
+    let tracked = TrackerTestEntity::shared(2);
+    world.entity_tracker().add(
+        &tracked,
+        |_| vec![old.id()],
+        |player_id| (player_id == old.id()).then(|| Arc::clone(&old)),
+    );
+    assert_eq!(world.entity_tracker().tracking_player_ids(2), [old.id()]);
+    old.set_sleeping_pos(BlockPos::new(0, 64, 0));
+    assert!(old.is_sleeping());
+
+    assert!(world.detach_player_for_respawn(&old, true));
+    let Some(retained) = world.players.get_by_uuid(&uuid) else {
+        panic!("same-world respawn should retain its exact old map occupant");
+    };
+    assert!(Arc::ptr_eq(&retained, &old));
+    assert!(world.get_entity_by_id(old.id()).is_none());
+    assert!(world.player_area_map.is_empty());
+    assert_eq!(
+        world.entity_tracker().tracking_player_ids(2),
+        Vec::<i32>::new()
+    );
+    assert!(old.last_tracking_view.lock().is_none());
+    assert!(!old.is_sleeping());
+    assert!(old.try_set_position(DVec3::new(1.0, 64.0, 1.0)).is_ok());
+
+    let leave_game = vanilla_stat_types::CUSTOM.get(&vanilla_custom_stats::LEAVE_GAME);
+    assert!(
+        old.stats()
+            .iter()
+            .all(|(stat, count)| *stat != leave_game || *count == 0)
+    );
+
+    assert!(world.install_respawned_player(Arc::clone(&replacement), Some(&old)));
+    let Some(installed) = world.players.get_by_uuid(&uuid) else {
+        panic!("fresh player should own the world player map");
+    };
+    assert!(Arc::ptr_eq(&installed, &replacement));
+    assert!(world.get_entity_by_id(replacement.id()).is_some());
+    assert!(!world.player_area_map.is_empty());
+    assert!(replacement.last_tracking_view.lock().is_some());
+
+    assert!(!world.install_respawned_player(stale, Some(&old)));
+    assert!(!world.detach_player_for_respawn(&old, false));
+    let Some(still_installed) = world.players.get_by_uuid(&uuid) else {
+        panic!("stale cleanup must not remove the installed replacement");
+    };
+    assert!(Arc::ptr_eq(&still_installed, &replacement));
+
+    assert!(world.remove_respawned_player(&replacement));
+    assert!(world.players.get_by_uuid(&uuid).is_none());
+    assert!(world.get_entity_by_id(replacement.id()).is_none());
+}
 
 fn advance_scheduling_until(world: &Arc<World>, mut ready: impl FnMut() -> bool) {
     let _runtime_guard = world.chunk_map.chunk_runtime.enter();
@@ -35,17 +111,18 @@ fn advance_scheduling_until(world: &Arc<World>, mut ready: impl FnMut() -> bool)
 #[test]
 fn sound_range_uses_event_range_and_strict_vanilla_boundary() {
     init_vanilla_registry();
-    let sound = &sound_events::ENTITY_PLAYER_LEVELUP;
+    let sound = SoundEventHolder::Registry(&sound_events::ENTITY_PLAYER_LEVELUP);
 
-    assert!(sound_is_within_range(sound, 0.75, 255.0));
-    assert!(!sound_is_within_range(sound, 0.75, 256.0));
+    assert!(sound_is_within_range(&sound, 0.75, 255.0));
+    assert!(!sound_is_within_range(&sound, 0.75, 256.0));
 }
 
 #[test]
 fn face_directed_item_drops_respect_block_drops_game_rule() {
     init_vanilla_registry();
-    let world = fresh_test_world("face_drop_game_rule");
-    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+    let world_fixture = fresh_test_world("face_drop_game_rule");
+    let world = &world_fixture.world;
+    insert_ready_full_chunk(world, ChunkPos::new(0, 0));
     assert!(world.set_game_rule(&vanilla_game_rules::BLOCK_DROPS, false));
 
     let dropped = world.pop_resource_from_face(
@@ -61,8 +138,9 @@ fn face_directed_item_drops_respect_block_drops_game_rule() {
 fn generic_shape_update_does_not_schedule_non_source_fluid() {
     init_vanilla_registry();
     init_behaviors();
-    let world = fresh_test_world("shape_update_fluid_ownership");
-    insert_ready_full_chunk(&world, ChunkPos::new(0, 0));
+    let world_fixture = fresh_test_world("shape_update_fluid_ownership");
+    let world = &world_fixture.world;
+    insert_ready_full_chunk(world, ChunkPos::new(0, 0));
     let pos = BlockPos::new(0, 64, 0);
     let flowing_water = vanilla_blocks::WATER
         .default_state()
@@ -168,14 +246,15 @@ fn entity_breaker_is_available_to_chorus_flower_loot() {
     let state = vanilla_blocks::CHORUS_FLOWER.default_state();
     let pos = BlockPos::new(1_312, 64, 1_312);
     let breaker = TrackerTestEntity::shared(987_654);
-    let world = fresh_test_world("entity_breaker_loot");
-    let context = BlockLootContext::new(&world, pos).with_entity(Some(breaker.as_ref()));
+    let world_fixture = fresh_test_world("entity_breaker_loot");
+    let world = &world_fixture.world;
+    let context = BlockLootContext::new(world, pos).with_entity(Some(breaker.as_ref()));
     let drops = context.get_drops(state);
 
     assert_eq!(drops.len(), 1);
     assert_eq!(drops[0].item(), &*vanilla_items::CHORUS_FLOWER);
     assert_eq!(drops[0].count(), 1);
-    assert_eq!(BlockLootContext::new(&world, pos).get_drops(state).len(), 0);
+    assert_eq!(BlockLootContext::new(world, pos).get_drops(state).len(), 0);
 }
 
 fn assert_vec3_close(left: DVec3, right: DVec3) {
@@ -314,14 +393,15 @@ fn set_block_matches_vanilla_update_limit_and_client_publication_gates() {
     init_vanilla_registry();
     init_behaviors();
 
-    let world = fresh_test_world("set_block_publication_gates");
+    let world_fixture = fresh_test_world("set_block_publication_gates");
+    let world = &world_fixture.world;
     let pos = BlockPos::new(1_504, 64, 1_504);
     let chunk_pos = ChunkPos::from_block_pos(pos);
     let player_id = Uuid::from_u128(1);
     let simulation_receipt = world
         .chunk_map
         .queue_test_player_ticket_add(chunk_pos, player_id);
-    advance_scheduling_until(&world, || {
+    advance_scheduling_until(world, || {
         world
             .chunk_map
             .is_ticket_receipt_committed(simulation_receipt)
@@ -409,7 +489,7 @@ fn set_block_matches_vanilla_update_limit_and_client_publication_gates() {
     let removal_receipt = world
         .chunk_map
         .queue_test_player_ticket_remove(chunk_pos, player_id);
-    advance_scheduling_until(&world, || {
+    advance_scheduling_until(world, || {
         world.chunk_map.is_ticket_receipt_committed(loading_receipt)
             && world.chunk_map.is_ticket_receipt_committed(removal_receipt)
     });
@@ -437,7 +517,7 @@ fn set_block_matches_vanilla_update_limit_and_client_publication_gates() {
         .chunk_map
         .release_chunk_request_leases(&[chunk_pos], loading_level)
         .expect("one request lease release should produce a receipt");
-    advance_scheduling_until(&world, || {
+    advance_scheduling_until(world, || {
         world
             .chunk_map
             .is_ticket_receipt_committed(full_only_receipt)

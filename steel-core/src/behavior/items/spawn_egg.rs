@@ -101,8 +101,8 @@ impl SpawnEggItem {
         }
 
         let world = parent.level()?;
-        let offspring = if let Some(animal) = parent.as_animal() {
-            animal.get_breed_offspring(&world, animal)?
+        let offspring = if let Some(ageable) = parent.as_ageable_mob() {
+            ageable.get_breed_offspring(&world, ageable)?
         } else {
             match create_entity_instance(&world, entity_type, parent.position()) {
                 Ok(offspring) => offspring,
@@ -128,7 +128,7 @@ impl SpawnEggItem {
         offspring.set_old_position_to_current();
         offspring.base().set_old_rotation_to_current();
         apply_implicit_item_stack_components(&offspring, stack);
-        add_spawned_entity(&world, offspring.clone()).ok()?;
+        add_spawned_entity(&world, Arc::clone(&offspring)).ok()?;
         Some(offspring)
     }
 }
@@ -168,7 +168,7 @@ impl ItemBehavior for SpawnEggItem {
             clicked_face.relative(clicked_pos)
         };
 
-        let result = Self::spawn_mob(
+        Self::spawn_mob(
             context.world,
             context.player,
             &context.inv,
@@ -176,13 +176,7 @@ impl ItemBehavior for SpawnEggItem {
             spawn_pos,
             true,
             spawn_pos != clicked_pos && clicked_face == steel_utils::Direction::Up,
-        );
-        if result == InteractionResult::Success {
-            context
-                .player
-                .award_stat(&vanilla_stat_types::ITEM_USED, stack.item());
-        }
-        result
+        )
     }
 
     fn use_item(&self, context: &mut UseItemContext) -> InteractionResult {
