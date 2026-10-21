@@ -9,7 +9,7 @@ use steel_registry::{
 };
 use steel_utils::translations;
 use text_components::{Modifier, TextComponent, format::Color};
-
+use steel_math::DEGREE_90;
 use crate::{
     command::{
         brigadier::CommandSyntaxError,
@@ -411,7 +411,7 @@ impl CommandSource {
         let delta = target - self.anchor_position();
         let horizontal = delta.x.hypot(delta.z);
         let pitch = -delta.y.atan2(horizontal).to_degrees() as f32;
-        let yaw = delta.z.atan2(delta.x).to_degrees() as f32 - 90.0;
+        let yaw = delta.z.atan2(delta.x).to_degrees() as f32 - DEGREE_90;
         self.with_rotation((yaw, pitch))
     }
 
