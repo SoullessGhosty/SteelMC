@@ -16,7 +16,7 @@ use super::{
     score::{parse_int_range, parse_score_holder, suggest_score_holders},
     selector::{EntitySelector, parse_entity_selector, suggest_entity_selector},
     structure::{parse_structure_or_tag_key, suggest_structures},
-    suggestions::suggest_resources,
+    suggestions::{matches_substring_ignore_case, suggest_resources},
     text::validate_component_syntax,
     world::{parse_world_argument, suggest_worlds},
 };
@@ -813,7 +813,7 @@ impl SteelArgumentParser for EntityTagParser {
             .source()
             .entity_tag_suggestions(targets)
             .into_iter()
-            .filter(|tag| tag.starts_with(prefix))
+            .filter(|tag| matches_substring_ignore_case(prefix, tag))
         {
             builder.suggest(tag);
         }
