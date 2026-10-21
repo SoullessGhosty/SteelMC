@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use steel_utils::{Identifier, translations};
-use text_components::{Modifier, TextComponent, format::Color, translation::Translation};
+use text_components::{Modifier, TextComponent, format::Color};
 
 use super::super::{
     brigadier::{ArgumentType, CommandNodeBuilder, CommandSyntaxError},
@@ -13,7 +13,6 @@ use super::super::{
     },
     registration::CommandRegistration,
 };
-use crate::entity::SharedEntity;
 
 pub(super) fn registration() -> CommandRegistration<CommandSource> {
     CommandRegistration::new(Identifier::vanilla_static("tag"), |_| command())
@@ -31,40 +30,45 @@ fn command() -> CommandNodeBuilder<CommandSource, SteelCommandRuntime> {
     )
 }
 
+#[derive(Clone, Copy)]
+enum TagChange {
+    Add,
+    Remove,
+}
+
 fn add_tag(context: &SteelCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
-    let name = context.string("name")?;
-    change_tags(
-        context,
-        &translations::COMMANDS_TAG_ADD_FAILED,
-        &translations::COMMANDS_TAG_ADD_SUCCESS_SINGLE,
-        &translations::COMMANDS_TAG_ADD_SUCCESS_MULTIPLE,
-        name,
-        |target| target.add_tag(name.to_owned()),
-    )
+    change_tags(context, TagChange::Add)
 }
 
 fn remove_tag(context: &SteelCommandContext<CommandSource>) -> Result<i32, CommandSyntaxError> {
-    let name = context.string("name")?;
-    change_tags(
-        context,
-        &translations::COMMANDS_TAG_REMOVE_FAILED,
-        &translations::COMMANDS_TAG_REMOVE_SUCCESS_SINGLE,
-        &translations::COMMANDS_TAG_REMOVE_SUCCESS_MULTIPLE,
-        name,
-        |target| target.remove_tag(name),
-    )
+    change_tags(context, TagChange::Remove)
 }
 
 fn change_tags(
     context: &SteelCommandContext<CommandSource>,
-    failed: &Translation<0>,
-    single: &Translation<2>,
-    multiple: &Translation<2>,
-    name: &str,
-    change: impl Fn(&SharedEntity) -> bool,
+    change: TagChange,
 ) -> Result<i32, CommandSyntaxError> {
+    let name = context.string("name")?;
+    let (failed, single, multiple) = match change {
+        TagChange::Add => (
+            &translations::COMMANDS_TAG_ADD_FAILED,
+            &translations::COMMANDS_TAG_ADD_SUCCESS_SINGLE,
+            &translations::COMMANDS_TAG_ADD_SUCCESS_MULTIPLE,
+        ),
+        TagChange::Remove => (
+            &translations::COMMANDS_TAG_REMOVE_FAILED,
+            &translations::COMMANDS_TAG_REMOVE_SUCCESS_SINGLE,
+            &translations::COMMANDS_TAG_REMOVE_SUCCESS_MULTIPLE,
+        ),
+    };
     let targets = context.entities("targets")?;
-    let changed: Vec<_> = targets.iter().filter(|target| change(target)).collect();
+    let changed: Vec<_> = targets
+        .iter()
+        .filter(|target| match change {
+            TagChange::Add => target.add_tag(name.to_owned()),
+            TagChange::Remove => target.remove_tag(name),
+        })
+        .collect();
 
     let message = match changed.as_slice() {
         [] => return Err(CommandSyntaxError::dynamic(failed)),
