@@ -67,15 +67,12 @@ fn change_tags(
     let changed: Vec<_> = targets.iter().filter(|target| change(target)).collect();
 
     let message = match changed.as_slice() {
-        [] => return Err(CommandSyntaxError::dynamic(TextComponent::from(failed))),
+        [] => return Err(CommandSyntaxError::dynamic(failed)),
         [target] => single
-            .message([TextComponent::plain(name.to_owned()), target.display_name()])
+            .message([TextComponent::from(name.to_owned()), target.display_name()])
             .component(),
         _ => multiple
-            .message([
-                TextComponent::plain(name.to_owned()),
-                TextComponent::plain(changed.len().to_string()),
-            ])
+            .message([name.to_owned(), changed.len().to_string()])
             .component(),
     };
     context.source().send_success(&message, true);
@@ -96,19 +93,19 @@ fn list_tags(context: &SteelCommandContext<CommandSource>) -> Result<i32, Comman
     // multiple form, even for a single target.
     let message = match tagged.as_slice() {
         [] => translations::COMMANDS_TAG_LIST_MULTIPLE_EMPTY
-            .message([TextComponent::plain("0")])
+            .message(["0"])
             .component(),
         [target] => translations::COMMANDS_TAG_LIST_SINGLE_SUCCESS
             .message([
                 target.display_name(),
-                TextComponent::plain(tags.len().to_string()),
+                TextComponent::from(tags.len().to_string()),
                 format_list(&tags),
             ])
             .component(),
         _ => translations::COMMANDS_TAG_LIST_MULTIPLE_SUCCESS
             .message([
-                TextComponent::plain(tagged.len().to_string()),
-                TextComponent::plain(tags.len().to_string()),
+                TextComponent::from(tagged.len().to_string()),
+                TextComponent::from(tags.len().to_string()),
                 format_list(&tags),
             ])
             .component(),
